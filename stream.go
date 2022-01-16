@@ -36,6 +36,85 @@ func (s *ObjectStream) outType() r.Type {
 
 /************************************************ slice stream exported ***********************************************/
 
+type objectStreamIterator struct {
+	stream *ObjectStream
+	next   r.Value
+}
+
+func (i *objectStreamIterator) HasNext() bool {
+	// find if have next and put it at i.next
+	iter := i.stream.iter
+	for iter.HasNext() {
+		next := iter.Next()
+		value := r.ValueOf(next)
+		valid := true
+		for _, fun := range i.stream.resolveChain {
+			result := fun.Invoke(value)
+			if result.Ok() {
+				value = result.Result()
+				continue
+			}
+			valid = false
+			break
+		}
+		if valid { // find valid next
+			i.next = value
+			return true
+		}
+	}
+	return false
+}
+
+func (i *objectStreamIterator) Next() interface{} {
+	return i.next.Interface()
+}
+
+// *ObjectStream self is iterable.
+func (s *ObjectStream) Iter() IIterator {
+	return &objectStreamIterator{stream: s}
+}
+
+type objectSteamAsKeyIter struct {
+	innerIter IIterator
+	mapper    r.Value
+}
+
+func (i *objectSteamAsKeyIter) HasNext() bool {
+	return i.innerIter.HasNext()
+}
+
+func (i objectSteamAsKeyIter) Next() IMapEntry {
+	next := i.innerIter.Next()
+	return &MapEntry{
+		key:   next,
+		value: i.mapper.Call([]r.Value{r.ValueOf(next)})[0].Interface(),
+	}
+}
+
+func (s *ObjectStream) IterAsMapKey(mapper Mapper) IMapIterator {
+	// TODO do type check
+	return &objectSteamAsKeyIter{
+		innerIter: s.Iter(),
+		mapper:    r.ValueOf(mapper),
+	}
+}
+
+// AsMapKey produce a MapEntryStream which using element in this object stream as map's key, and mapper(element)
+// as map's value from this ObjectStream
+func (s *ObjectStream) AsMapKey(mapper Mapper) *MapEntryStream {
+	if s.err != nil {
+		return &MapEntryStream{err: s.err}
+	}
+	// TODO do type check
+	mapInType := s.outType()
+	mapOutType := r.TypeOf(mapper).Out(0)
+	return &MapEntryStream{
+		iter:        s.IterAsMapKey(mapper),
+		inKeyType:   mapInType,
+		inValueType: mapOutType,
+	}
+}
+
 // Resolve Apply a function on every element of a stream.
 /**/
 // Typically is not usefully, because "Map" and "Filter" cover almost

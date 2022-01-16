@@ -86,9 +86,24 @@ func Test_Typical_EntryStream(t *testing.T) {
 		panic(err)
 	}
 	if !r.DeepEqual(fvRes, fvTarget) {
-		panic(fmt.Sprintf("target result after filter-value is: %v, while get: %v", fvTarget, fvRes))
+		panic(fmt.Sprintf("target result after filter-value is: %v, while get: %v\n", fvTarget, fvRes))
 	}
 	// TODO Add case
+}
+
+func Test_StreamToMap(t *testing.T) {
+	s := []int{0, 1, 2, 3, 4, 5, 6}
+	targetMap := map[int]string{0: "0", 1: "1", 2: "2", 3: "3", 4: "4", 5: "5"}
+	res, err := SliceStream(s).
+		AsMapKey(func(it int) string { return strconv.Itoa(it) }).
+		FilterValue(func(it string) bool { return it != "6" }).
+		Collect()
+	if err != nil {
+		panic(err)
+	}
+	if !r.DeepEqual(targetMap, res) {
+		panic(fmt.Sprintf("target map is: %v while get: %v\n", targetMap, res))
+	}
 }
 
 // TODO Add failed condition test
