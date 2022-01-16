@@ -5,6 +5,8 @@ A go module supplying Java-Like generic stream programming (while do type check 
 ### Get a Stream
 To get a Stream, using SliceStream(yourSlice).
 To get a EntryStream in which map key-value entry, useing EntryStream(youMap)
+
+### Using the Stream
 Because at that time point, the doc is very limited, check *_test.go to figure out how to use it
 
 ## Warning
