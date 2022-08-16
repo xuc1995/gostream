@@ -1,7 +1,6 @@
 package gostream
 
 import (
-	"fmt"
 	r "reflect"
 	"strconv"
 	"testing"
@@ -20,10 +19,10 @@ func Test_Typical_SliceStream(t *testing.T) {
 		}).
 		Collect()
 	if err != nil {
-		panic(err)
+		t.Error(err)
 	}
 	if !r.DeepEqual(target, slice) {
-		panic(fmt.Sprintf("target slice is: %v, while get: %v\n", target, slice))
+		t.Errorf("target slice is: %v, while get: %v\n", target, slice)
 	}
 }
 
@@ -66,10 +65,10 @@ func Test_Custom_Resolver(t *testing.T) {
 		Resolve(&multiInt{3}). // object becomes int64 after that
 		CollectAt(&slice)
 	if err != nil {
-		panic(err)
+		t.Error(err)
 	}
 	if !r.DeepEqual(slice, target) {
-		panic(fmt.Sprintf("target slice is :%v, while get: %v\n", target, slice))
+		t.Errorf("target slice is :%v, while get: %v\n", target, slice)
 	}
 	// TODO Add case
 }
@@ -83,10 +82,10 @@ func Test_Typical_EntryStream(t *testing.T) {
 		Filter(func(k int, v string) bool { return len(v) > 1 }).
 		CollectAt(&fvRes)
 	if err != nil {
-		panic(err)
+		t.Error(err)
 	}
 	if !r.DeepEqual(fvRes, fvTarget) {
-		panic(fmt.Sprintf("target result after filter-value is: %v, while get: %v\n", fvTarget, fvRes))
+		t.Errorf("target result after filter-value is: %v, while get: %v\n", fvTarget, fvRes)
 	}
 	// TODO Add case
 }
@@ -99,10 +98,10 @@ func Test_StreamToMap(t *testing.T) {
 		Filter(func(k int, v string) bool { return v != "6" }).
 		Collect()
 	if err != nil {
-		panic(err)
+		t.Error(err)
 	}
 	if !r.DeepEqual(targetMap, res) {
-		panic(fmt.Sprintf("target map is: %v while get: %v\n", targetMap, res))
+		t.Errorf("target map is: %v while get: %v\n", targetMap, res)
 	}
 }
 
