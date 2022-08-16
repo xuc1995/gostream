@@ -44,7 +44,7 @@ type multiInt struct {
 	fac int
 }
 
-func (dr *multiInt) Invoke(v r.Value) IResolveResult {
+func (dr *multiInt) Invoke(v r.Value) ResolveResult {
 	return &doubleIntResult{result: r.ValueOf(v.Int() * int64(dr.fac))}
 }
 
@@ -80,7 +80,7 @@ func Test_Typical_EntryStream(t *testing.T) {
 	fvRes := make(map[int]string)
 
 	err := EntryStream(m).
-		FilterValue(func(it string) bool { return len(it) > 1 }).
+		Filter(func(k int, v string) bool { return len(v) > 1 }).
 		CollectAt(&fvRes)
 	if err != nil {
 		panic(err)
@@ -96,7 +96,7 @@ func Test_StreamToMap(t *testing.T) {
 	targetMap := map[int]string{0: "0", 1: "1", 2: "2", 3: "3", 4: "4", 5: "5"}
 	res, err := SliceStream(s).
 		AsMapKey(func(it int) string { return strconv.Itoa(it) }).
-		FilterValue(func(it string) bool { return it != "6" }).
+		Filter(func(k int, v string) bool { return v != "6" }).
 		Collect()
 	if err != nil {
 		panic(err)

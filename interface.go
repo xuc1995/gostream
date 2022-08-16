@@ -16,43 +16,27 @@ type Mapper ResolveFun
 
 type Filter ResolveFun
 
-type IIterator interface {
-	HasNext() bool
-	Next() interface{}
+type Iterator interface {
+	Next() bool
+	Value() interface{}
 }
 
-type IMapEntry interface {
+type Entry interface {
 	Key() interface{}
 	Value() interface{}
 }
 
-type IMapIterator interface {
-	HasNext() bool
-	Next() IMapEntry
+type MapIterator interface {
+	Next() bool
+	Entry() Entry
 }
 
-type IResolveResult interface {
+type ResolveResult interface {
 	Result() r.Value
 	Ok() bool
 }
 
-type IResolver interface {
-	Invoke(v r.Value) IResolveResult
+type Resolver interface {
+	Invoke(v r.Value) ResolveResult
 	OutType() r.Type
-}
-
-type IEntry interface {
-	Key() r.Value
-	Value() r.Value
-}
-
-type IEntryResolveResult interface {
-	Result() IEntry
-	Ok() bool
-}
-
-type IEntryResolver interface {
-	Invoke(e IEntry) IEntryResolveResult
-	OutKeyType() r.Type
-	OutValueType() r.Type
 }

@@ -6,8 +6,8 @@ import r "reflect"
 
 type ObjectStream struct {
 	inType       r.Type
-	iter         IIterator
-	resolveChain []IResolver
+	iter         Iterator
+	resolveChain []Resolver
 	err          error
 }
 
@@ -21,7 +21,7 @@ func SliceStream(anySlice SliceOfT) *ObjectStream {
 	return &ObjectStream{iter: iter, inType: sliceType.Elem()}
 }
 
-func Stream(iterator IIterator, emptyContent interface{}) *ObjectStream {
+func Stream(iterator Iterator, emptyContent interface{}) *ObjectStream {
 	// TODO do type check
 	return &ObjectStream{iter: iterator, inType: r.TypeOf(emptyContent)}
 }
@@ -37,15 +37,15 @@ func (s *ObjectStream) outType() r.Type {
 /************************************************ slice stream exported ***********************************************/
 
 type objectStreamIterator struct {
-	stream *ObjectStream
-	next   r.Value
+	stream    *ObjectStream
+	nextValue r.Value
 }
 
-func (i *objectStreamIterator) HasNext() bool {
-	// find if have next and put it at i.next
+func (i *objectStreamIterator) Next() bool {
+	// find if have nextValue and put it at i.nextValue
 	iter := i.stream.iter
-	for iter.HasNext() {
-		next := iter.Next()
+	for iter.Next() {
+		next := iter.Value()
 		value := r.ValueOf(next)
 		valid := true
 		for _, fun := range i.stream.resolveChain {
@@ -57,41 +57,41 @@ func (i *objectStreamIterator) HasNext() bool {
 			valid = false
 			break
 		}
-		if valid { // find valid next
-			i.next = value
+		if valid { // find valid nextValue
+			i.nextValue = value
 			return true
 		}
 	}
 	return false
 }
 
-func (i *objectStreamIterator) Next() interface{} {
-	return i.next.Interface()
+func (i *objectStreamIterator) Value() interface{} {
+	return i.nextValue.Interface()
 }
 
 // *ObjectStream self is iterable.
-func (s *ObjectStream) Iter() IIterator {
+func (s *ObjectStream) Iter() Iterator {
 	return &objectStreamIterator{stream: s}
 }
 
 type objectSteamAsKeyIter struct {
-	innerIter IIterator
+	innerIter Iterator
 	mapper    r.Value
 }
 
-func (i *objectSteamAsKeyIter) HasNext() bool {
-	return i.innerIter.HasNext()
+func (i *objectSteamAsKeyIter) Next() bool {
+	return i.innerIter.Next()
 }
 
-func (i objectSteamAsKeyIter) Next() IMapEntry {
-	next := i.innerIter.Next()
-	return &MapEntry{
+func (i objectSteamAsKeyIter) Entry() Entry {
+	next := i.innerIter.Value()
+	return &mapEntry{
 		key:   next,
 		value: i.mapper.Call([]r.Value{r.ValueOf(next)})[0].Interface(),
 	}
 }
 
-func (s *ObjectStream) IterAsMapKey(mapper Mapper) IMapIterator {
+func (s *ObjectStream) IterAsMapKey(mapper Mapper) MapIterator {
 	// TODO do type check
 	return &objectSteamAsKeyIter{
 		innerIter: s.Iter(),
@@ -119,9 +119,9 @@ func (s *ObjectStream) AsMapKey(mapper Mapper) *MapEntryStream {
 /**/
 // Typically is not usefully, because "Map" and "Filter" cover almost
 // all conventional conditions.
-// It is somehow UNSAFE, because the real rtype of Invoke().result have not been checked which considering
-// be the same as what IResolver's OutType() pointer out.
-func (s *ObjectStream) Resolve(resolver IResolver) *ObjectStream {
+// It is somehow UNSAFE, because the real rtype of invoke().result have not been checked which considering
+// be the same as what Resolver's OutType() pointer out.
+func (s *ObjectStream) Resolve(resolver Resolver) *ObjectStream {
 	if s.err != nil {
 		return s
 	}
@@ -177,8 +177,8 @@ func (s *ObjectStream) CollectAt(u SliceOfU) error {
 // #no-type-check; #no-error-check
 func (s *ObjectStream) collect(target r.Value) *collectResult {
 	origin := target
-	for s.iter.HasNext() {
-		next := s.iter.Next()
+	for s.iter.Next() {
+		next := s.iter.Value()
 		value := r.ValueOf(next)
 		valid := true
 		for _, fun := range s.resolveChain {
@@ -223,7 +223,7 @@ func (m *mapperFun) OutType() r.Type {
 	return m.outType
 }
 
-func (m *mapperFun) Invoke(v r.Value) IResolveResult {
+func (m *mapperFun) Invoke(v r.Value) ResolveResult {
 	return &resolveResult{result: m.f.Call([]r.Value{v})[0], valid: true}
 }
 
@@ -232,7 +232,7 @@ type filterFun struct {
 	contentType r.Type
 }
 
-func (f *filterFun) Invoke(v r.Value) IResolveResult {
+func (f *filterFun) Invoke(v r.Value) ResolveResult {
 	return &resolveResult{result: v, valid: f.f.Call([]r.Value{v})[0].Bool()}
 }
 
@@ -246,8 +246,25 @@ type MapEntryStream struct {
 	err               error
 	inKeyType         r.Type
 	inValueType       r.Type
-	iter              IMapIterator
-	entryResolveChain []IEntryResolver
+	iter              MapIterator
+	entryResolveChain []*entryResolver
+}
+
+type entryResolver struct {
+	fn           r.Value // func(entry)
+	outKeyType   r.Type
+	outValueType r.Type
+}
+
+func (er *entryResolver) invoke(e *entry) *entryResolveResult {
+	ok := er.fn.Call([]r.Value{e.k, e.v})[0].Bool()
+	if ok {
+		return &entryResolveResult{
+			ok:     true,
+			result: e,
+		}
+	}
+	return &entryResolveResult{ok: false}
 }
 
 func EntryStream(anyMap MapOfKV) *MapEntryStream {
@@ -263,35 +280,35 @@ func EntryStream(anyMap MapOfKV) *MapEntryStream {
 		inKeyType:         keyType,
 		inValueType:       valueType,
 		iter:              iter,
-		entryResolveChain: make([]IEntryResolver, 0, 0),
+		entryResolveChain: make([]*entryResolver, 0, 0),
 	}
 }
 
 func (ms *MapEntryStream) outKeyType() r.Type {
 	if len(ms.entryResolveChain) > 0 {
-		return ms.entryResolveChain[len(ms.entryResolveChain)-1].OutKeyType()
+		return ms.entryResolveChain[len(ms.entryResolveChain)-1].outKeyType
 	}
 	return ms.inKeyType
 }
 
 func (ms *MapEntryStream) outValueType() r.Type {
 	if len(ms.entryResolveChain) > 0 {
-		return ms.entryResolveChain[len(ms.entryResolveChain)-1].OutValueType()
+		return ms.entryResolveChain[len(ms.entryResolveChain)-1].outValueType
 	}
 	return ms.inValueType
 }
 
 /********************************************* entry stream exported **************************************************/
 
-func (ms *MapEntryStream) FilterValue(filter Filter) *MapEntryStream {
+func (ms *MapEntryStream) Filter(filter Filter) *MapEntryStream {
 	if ms.err != nil {
 		return ms
 	}
 	// TODO do type check
-	ms.entryResolveChain = append(ms.entryResolveChain, &entryValueFilter{
-		f:                r.ValueOf(filter),
-		contentKeyType:   ms.outKeyType(),
-		contentValueType: ms.outValueType(),
+	ms.entryResolveChain = append(ms.entryResolveChain, &entryResolver{
+		fn:           r.ValueOf(filter),
+		outKeyType:   ms.outKeyType(),
+		outValueType: ms.outValueType(),
 	})
 	return ms
 }
@@ -316,21 +333,21 @@ func (ms *MapEntryStream) CollectAt(uw MapOfUW) error {
 
 // #no-type-check; #no-error-check
 func (ms *MapEntryStream) collect(target r.Value) *collectResult {
-	for ms.iter.HasNext() {
-		next := ms.iter.Next()
+	for ms.iter.Next() {
+		next := ms.iter.Entry()
 		valid := true
-		var entryValue IEntry = &entry{k: r.ValueOf(next.Key()), v: r.ValueOf(next.Value())}
+		var entryValue = &entry{k: r.ValueOf(next.Key()), v: r.ValueOf(next.Value())}
 		for _, fun := range ms.entryResolveChain {
-			result := fun.Invoke(entryValue)
-			if result.Ok() {
-				entryValue = result.Result()
+			result := fun.invoke(entryValue)
+			if result.ok {
+				entryValue = result.result
 				continue
 			}
 			valid = false
 			break
 		}
 		if valid {
-			target.SetMapIndex(entryValue.Key(), entryValue.Value())
+			target.SetMapIndex(entryValue.k, entryValue.v)
 		}
 	}
 	return &collectResult{origin: target, v: target, err: nil}
@@ -339,56 +356,13 @@ func (ms *MapEntryStream) collect(target r.Value) *collectResult {
 /********************************************* entry resolve result ***************************************************/
 
 type entryResolveResult struct {
-	result IEntry
+	result *entry
 	ok     bool
-}
-
-func (e *entryResolveResult) Result() IEntry {
-	return e.result
-}
-
-func (e *entryResolveResult) Ok() bool {
-	return e.ok
 }
 
 type entry struct {
 	k r.Value
 	v r.Value
-}
-
-func (e *entry) Key() r.Value {
-	return e.k
-}
-
-func (e *entry) Value() r.Value {
-	return e.v
-}
-
-/********************************************* entry stream resolver **************************************************/
-
-type entryValueFilter struct {
-	f                r.Value
-	contentKeyType   r.Type
-	contentValueType r.Type
-}
-
-func (ef *entryValueFilter) Invoke(e IEntry) IEntryResolveResult {
-	ok := ef.f.Call([]r.Value{e.Value()})[0].Bool()
-	if ok {
-		return &entryResolveResult{
-			ok:     true,
-			result: e,
-		}
-	}
-	return &entryResolveResult{ok: false}
-}
-
-func (ef *entryValueFilter) OutKeyType() r.Type {
-	return ef.contentKeyType
-}
-
-func (ef *entryValueFilter) OutValueType() r.Type {
-	return ef.contentValueType
 }
 
 /************************************************** stream common *****************************************************/
