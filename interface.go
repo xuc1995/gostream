@@ -1,28 +1,34 @@
 package gostream
 
-import r "reflect"
+import "reflect"
+
+/****************************************************** public ********************************************************/
 
 type Iterator interface {
 	Next() bool
 	Value() interface{}
 }
 
-type Entry interface {
+type MapIterator interface {
+	Next() bool
 	Key() interface{}
 	Value() interface{}
 }
 
-type MapIterator interface {
+/***************************************************** private ********************************************************/
+
+type iterator interface {
 	Next() bool
-	Entry() Entry
+	Value() reflect.Value
 }
 
-type ResolveResult interface {
-	Result() r.Value
-	Ok() bool
+type mapIterator interface {
+	Next() bool
+	Key() reflect.Value
+	Value() reflect.Value
 }
 
-type Resolver interface {
-	Invoke(v r.Value) ResolveResult
-	OutType() r.Type
+type resolver interface {
+	Invoke(v reflect.Value) (reflect.Value, bool)
+	OutType() reflect.Type
 }

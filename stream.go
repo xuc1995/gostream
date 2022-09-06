@@ -2,17 +2,17 @@ package gostream
 
 import r "reflect"
 
-/************************************************* slice stream *******************************************************/
+/************************************************* sequence stream ****************************************************/
 
 type ObjectStream struct {
 	inType       r.Type
-	iter         Iterator
-	resolveChain []Resolver
+	iter         iterator
+	resolveChain []resolver
 	err          error
 }
 
 func SliceStream(anySlice interface{}) *ObjectStream {
-	iter, err := Iter(anySlice)
+	iter, err := iter(anySlice)
 	if err != nil {
 		return &ObjectStream{err: err}
 	}
@@ -23,7 +23,7 @@ func SliceStream(anySlice interface{}) *ObjectStream {
 
 func Stream(iterator Iterator, Type interface{}) *ObjectStream {
 	// TODO do type check
-	return &ObjectStream{iter: iterator, inType: r.TypeOf(Type)}
+	return &ObjectStream{iter: iterAdaptor{iterator}, inType: r.TypeOf(Type)}
 }
 
 func (s *ObjectStream) outType() r.Type {
@@ -34,7 +34,7 @@ func (s *ObjectStream) outType() r.Type {
 	return s.resolveChain[chainLen-1].OutType()
 }
 
-/************************************************ slice stream exported ***********************************************/
+/************************************************ sequence stream exported ********************************************/
 
 type objectStreamIterator struct {
 	stream    *ObjectStream
@@ -45,13 +45,11 @@ func (i *objectStreamIterator) Next() bool {
 	// find if have nextValue and put it at i.nextValue
 	iter := i.stream.iter
 	for iter.Next() {
-		next := iter.Value()
-		value := r.ValueOf(next)
+		value := iter.Value()
 		valid := true
 		for _, fun := range i.stream.resolveChain {
-			result := fun.Invoke(value)
-			if result.Ok() {
-				value = result.Result()
+			if result, ok := fun.Invoke(value); ok {
+				value = result
 				continue
 			}
 			valid = false
@@ -65,17 +63,12 @@ func (i *objectStreamIterator) Next() bool {
 	return false
 }
 
-func (i *objectStreamIterator) Value() interface{} {
-	return i.nextValue.Interface()
-}
-
-// *ObjectStream self is iterable.
-func (s *ObjectStream) Iter() Iterator {
-	return &objectStreamIterator{stream: s}
+func (i *objectStreamIterator) Value() r.Value {
+	return i.nextValue
 }
 
 type objectSteamAsKeyIter struct {
-	innerIter Iterator
+	innerIter iterator
 	mapper    r.Value
 }
 
@@ -83,18 +76,19 @@ func (i *objectSteamAsKeyIter) Next() bool {
 	return i.innerIter.Next()
 }
 
-func (i objectSteamAsKeyIter) Entry() Entry {
+func (i objectSteamAsKeyIter) Key() r.Value {
 	next := i.innerIter.Value()
-	return &mapEntry{
-		key:   next,
-		value: i.mapper.Call([]r.Value{r.ValueOf(next)})[0].Interface(),
-	}
+	return next
 }
 
-func (s *ObjectStream) IterAsMapKey(mapper interface{}) MapIterator {
+func (i objectSteamAsKeyIter) Value() r.Value {
+	return i.mapper.Call([]r.Value{i.innerIter.Value()})[0]
+}
+
+func (s *ObjectStream) iterAsMapKey(mapper interface{}) mapIterator {
 	// TODO do type check
 	return &objectSteamAsKeyIter{
-		innerIter: s.Iter(),
+		innerIter: &objectStreamIterator{stream: s},
 		mapper:    r.ValueOf(mapper),
 	}
 }
@@ -109,26 +103,10 @@ func (s *ObjectStream) AsMapKey(mapper interface{}) *MapEntryStream {
 	mapInType := s.outType()
 	mapOutType := r.TypeOf(mapper).Out(0)
 	return &MapEntryStream{
-		iter:        s.IterAsMapKey(mapper),
+		iter:        s.iterAsMapKey(mapper),
 		inKeyType:   mapInType,
 		inValueType: mapOutType,
 	}
-}
-
-// Resolve Apply a function on every element of a stream.
-/**/
-// Typically is not usefully, because "Map" and "Filter" cover almost
-// all conventional conditions.
-// It is somehow UNSAFE, because the real rtype of invoke().result have not been checked which considering
-// be the same as what Resolver's OutType() pointer out.
-func (s *ObjectStream) Resolve(resolver Resolver) *ObjectStream {
-	if s.err != nil {
-		return s
-	}
-	// TODO do type check
-	s.resolveChain = append(s.resolveChain, resolver)
-	return s
-
 }
 
 func (s *ObjectStream) Filter(filter interface{}) *ObjectStream {
@@ -178,12 +156,11 @@ func (s *ObjectStream) CollectAt(u interface{}) error {
 func (s *ObjectStream) collect(target r.Value) *collectResult {
 	origin := target
 	for s.iter.Next() {
-		next := s.iter.Value()
-		value := r.ValueOf(next)
+		value := s.iter.Value()
 		valid := true
 		for _, fun := range s.resolveChain {
-			if result := fun.Invoke(value); result.Ok() {
-				value = result.Result()
+			if result, ok := fun.Invoke(value); ok {
+				value = result
 			} else {
 				valid = false
 				break
@@ -196,22 +173,7 @@ func (s *ObjectStream) collect(target r.Value) *collectResult {
 	return &collectResult{origin, target, nil}
 }
 
-/************************************************ resolve result ******************************************************/
-
-type resolveResult struct {
-	result r.Value
-	valid  bool
-}
-
-func (i *resolveResult) Result() r.Value {
-	return i.result
-}
-
-func (i *resolveResult) Ok() bool {
-	return i.valid
-}
-
-/********************************************* slice stream resolver **************************************************/
+/********************************************* sequence stream resolver ***********************************************/
 
 type mapperFun struct {
 	f       r.Value
@@ -223,8 +185,8 @@ func (m *mapperFun) OutType() r.Type {
 	return m.outType
 }
 
-func (m *mapperFun) Invoke(v r.Value) ResolveResult {
-	return &resolveResult{result: m.f.Call([]r.Value{v})[0], valid: true}
+func (m *mapperFun) Invoke(v r.Value) (r.Value, bool) {
+	return m.f.Call([]r.Value{v})[0], true
 }
 
 type filterFun struct {
@@ -232,8 +194,8 @@ type filterFun struct {
 	contentType r.Type
 }
 
-func (f *filterFun) Invoke(v r.Value) ResolveResult {
-	return &resolveResult{result: v, valid: f.f.Call([]r.Value{v})[0].Bool()}
+func (f *filterFun) Invoke(v r.Value) (r.Value, bool) {
+	return v, f.f.Call([]r.Value{v})[0].Bool()
 }
 
 func (f *filterFun) OutType() r.Type {
@@ -246,7 +208,7 @@ type MapEntryStream struct {
 	err               error
 	inKeyType         r.Type
 	inValueType       r.Type
-	iter              MapIterator
+	iter              mapIterator
 	entryResolveChain []*entryResolver
 }
 
@@ -268,7 +230,7 @@ func (er *entryResolver) invoke(e *entry) *entryResolveResult {
 }
 
 func EntryStream(anyMap interface{}) *MapEntryStream {
-	iter, err := IterMap(anyMap)
+	iter, err := iterMap(anyMap)
 	if err != nil {
 		return &MapEntryStream{err: err}
 	}
@@ -334,9 +296,8 @@ func (ms *MapEntryStream) CollectAt(uw interface{}) error {
 // #no-type-check; #no-error-check
 func (ms *MapEntryStream) collect(target r.Value) *collectResult {
 	for ms.iter.Next() {
-		next := ms.iter.Entry()
 		valid := true
-		var entryValue = &entry{k: r.ValueOf(next.Key()), v: r.ValueOf(next.Value())}
+		var entryValue = &entry{k: ms.iter.Key(), v: ms.iter.Value()}
 		for _, fun := range ms.entryResolveChain {
 			result := fun.invoke(entryValue)
 			if result.ok {

@@ -1,61 +1,45 @@
 package gostream
 
-import r "reflect"
+import (
+	"fmt"
+	r "reflect"
+)
 
-type iterator struct {
-	slice        r.Value
+type iterAdaptor struct{ Iterator }
+
+func (i iterAdaptor) Value() r.Value {
+	return r.ValueOf(i.Iterator.Value())
+}
+
+type sequenceIterator struct {
+	sequence     r.Value
 	currentIndex int
 }
 
-func (i *iterator) Next() bool {
-	return i.currentIndex < i.slice.Len()
+func (i *sequenceIterator) Next() bool {
+	return i.currentIndex < i.sequence.Len()
 }
 
-func (i *iterator) Value() interface{} {
-	next := i.slice.Index(i.currentIndex)
+func (i *sequenceIterator) Value() r.Value {
+	next := i.sequence.Index(i.currentIndex)
 	i.currentIndex++
-	return next.Interface()
+	return next
 }
 
-type mapEntry struct {
-	key   interface{}
-	value interface{}
-}
-
-func (e *mapEntry) Key() interface{} {
-	return e.key
-}
-
-func (e *mapEntry) Value() interface{} {
-	return e.value
-}
-
-type mapIterator struct {
-	mapIter *r.MapIter
-}
-
-func (i *mapIterator) Next() bool {
-	return i.mapIter.Next()
-}
-
-func (i *mapIterator) Entry() Entry {
-	return &mapEntry{
-		key:   i.mapIter.Key().Interface(),
-		value: i.mapIter.Value().Interface(),
+func iter(anySlice interface{}) (iterator, error) {
+	v := r.ValueOf(anySlice)
+	if !isSequence(v) {
+		return nil, fmt.Errorf("parameter is not of type sequence or array, whitch is: %T", anySlice)
 	}
-}
-
-func Iter(anySlice interface{}) (Iterator, error) {
-	// TODO do type check
-	return &iterator{
-		slice: r.ValueOf(anySlice),
+	return &sequenceIterator{
+		sequence: v,
 	}, nil
 }
 
-func IterMap(anyMap interface{}) (MapIterator, error) {
-	// TODO do type check
+func iterMap(anyMap interface{}) (mapIterator, error) {
 	mapValue := r.ValueOf(anyMap)
-	return &mapIterator{
-		mapIter: mapValue.MapRange(),
-	}, nil
+	if !isMap(mapValue) {
+		return nil, fmt.Errorf("parameter is not of type map, which is: %T", anyMap)
+	}
+	return mapValue.MapRange(), nil
 }
