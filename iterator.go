@@ -45,14 +45,14 @@ func (i *mapIterator) Entry() Entry {
 	}
 }
 
-func Iter(anySlice SliceOfT) (Iterator, error) {
+func Iter(anySlice interface{}) (Iterator, error) {
 	// TODO do type check
 	return &iterator{
 		slice: r.ValueOf(anySlice),
 	}, nil
 }
 
-func IterMap(anyMap MapOfKV) (MapIterator, error) {
+func IterMap(anyMap interface{}) (MapIterator, error) {
 	// TODO do type check
 	mapValue := r.ValueOf(anyMap)
 	return &mapIterator{

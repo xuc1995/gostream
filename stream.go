@@ -11,7 +11,7 @@ type ObjectStream struct {
 	err          error
 }
 
-func SliceStream(anySlice SliceOfT) *ObjectStream {
+func SliceStream(anySlice interface{}) *ObjectStream {
 	iter, err := Iter(anySlice)
 	if err != nil {
 		return &ObjectStream{err: err}
@@ -21,9 +21,9 @@ func SliceStream(anySlice SliceOfT) *ObjectStream {
 	return &ObjectStream{iter: iter, inType: sliceType.Elem()}
 }
 
-func Stream(iterator Iterator, emptyContent interface{}) *ObjectStream {
+func Stream(iterator Iterator, Type interface{}) *ObjectStream {
 	// TODO do type check
-	return &ObjectStream{iter: iterator, inType: r.TypeOf(emptyContent)}
+	return &ObjectStream{iter: iterator, inType: r.TypeOf(Type)}
 }
 
 func (s *ObjectStream) outType() r.Type {
@@ -91,7 +91,7 @@ func (i objectSteamAsKeyIter) Entry() Entry {
 	}
 }
 
-func (s *ObjectStream) IterAsMapKey(mapper Mapper) MapIterator {
+func (s *ObjectStream) IterAsMapKey(mapper interface{}) MapIterator {
 	// TODO do type check
 	return &objectSteamAsKeyIter{
 		innerIter: s.Iter(),
@@ -101,7 +101,7 @@ func (s *ObjectStream) IterAsMapKey(mapper Mapper) MapIterator {
 
 // AsMapKey produce a MapEntryStream which using element in this object stream as map's key, and mapper(element)
 // as map's value from this ObjectStream
-func (s *ObjectStream) AsMapKey(mapper Mapper) *MapEntryStream {
+func (s *ObjectStream) AsMapKey(mapper interface{}) *MapEntryStream {
 	if s.err != nil {
 		return &MapEntryStream{err: s.err}
 	}
@@ -131,7 +131,7 @@ func (s *ObjectStream) Resolve(resolver Resolver) *ObjectStream {
 
 }
 
-func (s *ObjectStream) Filter(filter Filter) *ObjectStream {
+func (s *ObjectStream) Filter(filter interface{}) *ObjectStream {
 	if s.err != nil {
 		return s
 	}
@@ -143,7 +143,7 @@ func (s *ObjectStream) Filter(filter Filter) *ObjectStream {
 	return s
 }
 
-func (s *ObjectStream) Map(mapper Mapper) *ObjectStream {
+func (s *ObjectStream) Map(mapper interface{}) *ObjectStream {
 	if s.err != nil {
 		return s
 	}
@@ -156,7 +156,7 @@ func (s *ObjectStream) Map(mapper Mapper) *ObjectStream {
 	return s
 }
 
-func (s *ObjectStream) Collect() (SliceOfU, error) {
+func (s *ObjectStream) Collect() (interface{}, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -165,7 +165,7 @@ func (s *ObjectStream) Collect() (SliceOfU, error) {
 	return s.collect(resValue).interfaceOrErr()
 }
 
-func (s *ObjectStream) CollectAt(u SliceOfU) error {
+func (s *ObjectStream) CollectAt(u interface{}) error {
 	if s.err != nil {
 		return s.err
 	}
@@ -267,7 +267,7 @@ func (er *entryResolver) invoke(e *entry) *entryResolveResult {
 	return &entryResolveResult{ok: false}
 }
 
-func EntryStream(anyMap MapOfKV) *MapEntryStream {
+func EntryStream(anyMap interface{}) *MapEntryStream {
 	iter, err := IterMap(anyMap)
 	if err != nil {
 		return &MapEntryStream{err: err}
@@ -300,7 +300,7 @@ func (ms *MapEntryStream) outValueType() r.Type {
 
 /********************************************* entry stream exported **************************************************/
 
-func (ms *MapEntryStream) Filter(filter Filter) *MapEntryStream {
+func (ms *MapEntryStream) Filter(filter interface{}) *MapEntryStream {
 	if ms.err != nil {
 		return ms
 	}
@@ -313,7 +313,7 @@ func (ms *MapEntryStream) Filter(filter Filter) *MapEntryStream {
 	return ms
 }
 
-func (ms *MapEntryStream) Collect() (MapOfUW, error) {
+func (ms *MapEntryStream) Collect() (interface{}, error) {
 	if ms.err != nil {
 		return nil, ms.err
 	}
@@ -325,7 +325,7 @@ func (ms *MapEntryStream) Collect() (MapOfUW, error) {
 	return ms.collect(resMap).interfaceOrErr()
 }
 
-func (ms *MapEntryStream) CollectAt(uw MapOfUW) error {
+func (ms *MapEntryStream) CollectAt(uw interface{}) error {
 	targetMap := r.ValueOf(uw).Elem()
 	// TODO do type check
 	return ms.collect(targetMap).writeBack()
