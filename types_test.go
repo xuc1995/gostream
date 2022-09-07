@@ -24,7 +24,7 @@ func TestIsFilter(t *testing.T) {
 	f := func(it int) bool {
 		return false
 	}
-	if !isFilterOf(r.ValueOf(f), r.TypeOf(0)) {
+	if !isFilterOf(r.TypeOf(f), r.TypeOf(0)) {
 		t.Errorf("f should be a filter")
 	}
 }

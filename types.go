@@ -9,28 +9,13 @@ func isSequence(v r.Value) bool {
 	return kind == r.Slice || kind == r.Array
 }
 
-func isSlice(v r.Value) bool {
-	return v.IsValid() && v.Type().Kind() == r.Slice
+func isMapOf(typ, kType, vType r.Type) bool {
+	return typ.Kind() == r.Map &&
+		typ.Key().Kind() == kType.Kind() &&
+		typ.Elem().Kind() == vType.Kind()
 }
 
-func isMap(v r.Value) bool {
-	if v.IsValid() {
-		return v.Type().Kind() == r.Map
-	}
-	return false
-}
-
-func isMapOf(m r.Value, kType, vType r.Type) bool {
-	return isMap(m) &&
-		m.Type().Key().Kind() == kType.Kind() &&
-		m.Type().Elem().Kind() == vType.Kind()
-}
-
-func isFilterOf(f r.Value, itemType r.Type) bool {
-	if !f.IsValid() {
-		return false
-	}
-	typ := f.Type()
+func isFilterOf(typ, itemType r.Type) bool {
 	return typ.Kind() == r.Func &&
 		typ.NumIn() == 1 &&
 		typ.NumOut() == 1 &&
@@ -38,33 +23,25 @@ func isFilterOf(f r.Value, itemType r.Type) bool {
 		typ.Out(0).Kind() == r.Bool
 }
 
-func isMapperOf(f r.Value, inType r.Kind) bool {
-	if !f.IsValid() {
-		return false
-	}
-	typ := f.Type()
+func isMapperOf(typ, inType r.Type) bool {
 	return typ.Kind() == r.Func &&
 		typ.NumIn() == 1 &&
 		typ.NumOut() == 1 &&
-		typ.In(0).Kind() == inType
+		typ.In(0).Kind() == inType.Kind()
 }
 
-func isPointer(p r.Value) bool {
-	if !p.IsValid() {
-		return false
-	}
-	return p.Kind() == r.Ptr
-}
-
-func isEntryFilterOf(f r.Value, kType, vType r.Type) bool {
-	if !f.IsValid() {
-		return false
-	}
-	typ := f.Type()
+func isEntryFilterOf(typ, kType, vType r.Type) bool {
 	return typ.Kind() == r.Func &&
 		typ.NumIn() == 2 &&
 		typ.NumOut() == 1 &&
 		typ.Out(0).Kind() == r.Bool &&
 		typ.In(0).Kind() == kType.Kind() &&
 		typ.In(1).Kind() == vType.Kind()
+}
+
+func isObjectToEntryAdaptorOf(adaptorType, elemType r.Type) bool {
+	return adaptorType.Kind() == r.Func &&
+		adaptorType.NumIn() == 1 &&
+		adaptorType.NumOut() == 2 &&
+		adaptorType.In(0).Kind() == elemType.Kind()
 }

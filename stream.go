@@ -82,26 +82,46 @@ func (i *objectStreamIterator) Value() r.Value {
 	return i.nextValue
 }
 
-type objectSteamAsKeyIter struct {
+type objectToEntryIter struct {
 	innerIter iterator
 	mapper    r.Value
+
+	// It is important to ensure that mapper func is invoked only once during on Next() call
+	mapperCalled bool
+	k            r.Value
+	v            r.Value
 }
 
-func (i *objectSteamAsKeyIter) Next() bool {
-	return i.innerIter.Next()
+func (i *objectToEntryIter) Next() bool {
+	hasNext := i.innerIter.Next()
+	i.mapperCalled = false
+	return hasNext
 }
 
-func (i objectSteamAsKeyIter) Key() r.Value {
-	return i.innerIter.Value()
+func (i objectToEntryIter) Key() r.Value {
+	if i.mapperCalled {
+		return i.k
+	}
+	callResult := i.mapper.Call(p{i.innerIter.Value()})
+	i.mapperCalled = true
+	i.k = callResult[0]
+	i.v = callResult[1]
+	return i.k
 }
 
-func (i objectSteamAsKeyIter) Value() r.Value {
-	return i.mapper.Call([]r.Value{i.innerIter.Value()})[0]
+func (i objectToEntryIter) Value() r.Value {
+	if i.mapperCalled {
+		return i.v
+	}
+	callResult := i.mapper.Call(p{i.innerIter.Value()})
+	i.mapperCalled = true
+	i.k = callResult[0]
+	i.v = callResult[1]
+	return i.v
 }
 
-func (s *ObjectStream) iterAsMapKey(mapper interface{}) mapIterator {
-	// TODO do type check
-	return &objectSteamAsKeyIter{
+func (s *ObjectStream) toEntryIterator(mapper interface{}) mapIterator {
+	return &objectToEntryIter{
 		innerIter: &objectStreamIterator{stream: s},
 		mapper:    r.ValueOf(mapper),
 	}
@@ -109,19 +129,20 @@ func (s *ObjectStream) iterAsMapKey(mapper interface{}) mapIterator {
 
 /************************************************ sequence stream exported ********************************************/
 
-// AsMapKey produce a MapEntryStream which using element in this object stream as map's key, and mapper(element)
-// as map's value from this ObjectStream
-func (s *ObjectStream) AsMapKey(mapper interface{}) *MapEntryStream {
+func (s *ObjectStream) ToEntryStream(mapper interface{}) *MapEntryStream {
 	if s.err != nil {
 		return &MapEntryStream{err: s.err}
 	}
-	// TODO do type check
-	mapInType := s.outType()
-	mapOutType := r.TypeOf(mapper).Out(0)
+	mapperType := r.TypeOf(mapper)
+	inKeyType := mapperType.Out(0)
+	inValueType := mapperType.Out(1)
+	if !isObjectToEntryAdaptorOf(mapperType, s.outType()) {
+		return &MapEntryStream{err: fmt.Errorf("paramter mapper error: %T", mapper)}
+	}
 	return &MapEntryStream{
-		iter:        s.iterAsMapKey(mapper),
-		inKeyType:   mapInType,
-		inValueType: mapOutType,
+		iter:        s.toEntryIterator(mapper),
+		inKeyType:   inKeyType,
+		inValueType: inValueType,
 	}
 }
 
@@ -131,7 +152,7 @@ func (s *ObjectStream) Filter(filter interface{}) *ObjectStream {
 	}
 	fv := r.ValueOf(filter)
 	oType := s.outType()
-	if !isFilterOf(fv, s.outType()) || fv.Type().In(0).Kind() != oType.Kind() {
+	if !isFilterOf(fv.Type(), s.outType()) || fv.Type().In(0).Kind() != oType.Kind() {
 		s.err = fmt.Errorf("filter type error, which is: %T", filter)
 		return s
 	}
@@ -148,7 +169,7 @@ func (s *ObjectStream) Map(mapper interface{}) *ObjectStream {
 	}
 	mv := r.ValueOf(mapper)
 	inType := s.outType()
-	if !isMapperOf(mv, inType.Kind()) {
+	if !isMapperOf(mv.Type(), inType) {
 		s.err = fmt.Errorf("mapper type error, which is: %T", mapper)
 		return s
 	}
@@ -175,11 +196,11 @@ func (s *ObjectStream) CollectAt(at interface{}) error {
 		return s.err
 	}
 	value := r.ValueOf(at)
-	if !isPointer(value) {
+	if value.Kind() != r.Ptr {
 		return fmt.Errorf("parameter of CollectAt should be pointer, but is: %T", at)
 	}
 	target := value.Elem()
-	if !isSlice(target) {
+	if target.Kind() != r.Slice {
 		return fmt.Errorf("parameter of CollectAt should be pointer of slice, but is: %s", target.Kind().String())
 	}
 	elemType := target.Type().Elem()
@@ -254,7 +275,6 @@ func EntryStream(anyMap interface{}) *MapEntryStream {
 	if err != nil {
 		return &MapEntryStream{err: err}
 	}
-	// TODO do type check
 	mapType := r.TypeOf(anyMap)
 	keyType := mapType.Key()
 	valueType := mapType.Elem()
@@ -308,7 +328,7 @@ func (ms *MapEntryStream) Filter(filter interface{}) *MapEntryStream {
 	fv := r.ValueOf(filter)
 	keyType := ms.outKeyType()
 	valueType := ms.outValueType()
-	if !isEntryFilterOf(fv, keyType, valueType) {
+	if !isEntryFilterOf(fv.Type(), keyType, valueType) {
 		ms.err = fmt.Errorf("filter type error: %T", filter)
 		return ms
 	}
@@ -335,11 +355,11 @@ func (ms *MapEntryStream) CollectAt(at interface{}) error {
 		return ms.err
 	}
 	pointer := r.ValueOf(at)
-	if !isPointer(pointer) {
+	if pointer.Kind() != r.Ptr {
 		return fmt.Errorf("parameter of CollectAt should be pointer, but is: %T", at)
 	}
 	value := pointer.Elem()
-	if !isMapOf(value, ms.outKeyType(), ms.outValueType()) {
+	if !isMapOf(value.Type(), ms.outKeyType(), ms.outValueType()) {
 		return fmt.Errorf("parameter type error: %T", at)
 	}
 	return ms.collect(value).writeBack()

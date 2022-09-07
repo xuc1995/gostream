@@ -47,7 +47,7 @@ func Test_StreamToMap(t *testing.T) {
 	s := []int{0, 1, 2, 3, 4, 5, 6}
 	targetMap := map[int]string{0: "0", 1: "1", 2: "2", 3: "3", 4: "4", 5: "5"}
 	res, err := SliceStream(s).
-		AsMapKey(func(it int) string { return strconv.Itoa(it) }).
+		ToEntryStream(func(it int) (int, string) { return it, strconv.Itoa(it) }).
 		Filter(func(k int, v string) bool { return v != "6" }).
 		Collect()
 	if err != nil {

@@ -38,7 +38,7 @@ func iter(anySlice interface{}) (iterator, error) {
 
 func iterMap(anyMap interface{}) (mapIterator, error) {
 	mapValue := r.ValueOf(anyMap)
-	if !isMap(mapValue) {
+	if mapValue.Kind() != r.Map {
 		return nil, fmt.Errorf("parameter is not of type map, which is: %T", anyMap)
 	}
 	return mapValue.MapRange(), nil
