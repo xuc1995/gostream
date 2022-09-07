@@ -1,6 +1,14 @@
 package gostream
 
-import r "reflect"
+import (
+	"errors"
+	"fmt"
+	r "reflect"
+)
+
+var errParameterNotASequence = errors.New("parameter is not a sequence")
+
+var errParameterTypeNil = errors.New("parameter itemType is nil")
 
 /************************************************* sequence stream ****************************************************/
 
@@ -11,19 +19,28 @@ type ObjectStream struct {
 	err          error
 }
 
-func SliceStream(anySlice interface{}) *ObjectStream {
-	iter, err := iter(anySlice)
+func SliceStream(sequence interface{}) *ObjectStream {
+	iter, err := iter(sequence)
 	if err != nil {
 		return &ObjectStream{err: err}
 	}
-	// TODO do type check
-	sliceType := r.TypeOf(anySlice)
-	return &ObjectStream{iter: iter, inType: sliceType.Elem()}
+	value := r.ValueOf(sequence)
+	if !isSequence(value) {
+		return &ObjectStream{err: errParameterNotASequence}
+	}
+	typ := r.TypeOf(sequence)
+	return &ObjectStream{iter: iter, inType: typ.Elem()}
 }
 
-func Stream(iterator Iterator, Type interface{}) *ObjectStream {
-	// TODO do type check
-	return &ObjectStream{iter: iterAdaptor{iterator}, inType: r.TypeOf(Type)}
+// Stream make an ObjectStream from an iterator.
+//
+// Before iterator invoked, out type of iterator could not be known, so make sure itemType is actually correct,
+// or it would cause runtime panic
+func Stream(iterator Iterator, itemType interface{}) *ObjectStream {
+	if !r.ValueOf(itemType).IsValid() {
+		return &ObjectStream{err: errParameterTypeNil}
+	}
+	return &ObjectStream{iter: iterAdaptor{iterator}, inType: r.TypeOf(itemType)}
 }
 
 func (s *ObjectStream) outType() r.Type {
@@ -33,8 +50,6 @@ func (s *ObjectStream) outType() r.Type {
 	}
 	return s.resolveChain[chainLen-1].OutType()
 }
-
-/************************************************ sequence stream exported ********************************************/
 
 type objectStreamIterator struct {
 	stream    *ObjectStream
@@ -77,8 +92,7 @@ func (i *objectSteamAsKeyIter) Next() bool {
 }
 
 func (i objectSteamAsKeyIter) Key() r.Value {
-	next := i.innerIter.Value()
-	return next
+	return i.innerIter.Value()
 }
 
 func (i objectSteamAsKeyIter) Value() r.Value {
@@ -92,6 +106,8 @@ func (s *ObjectStream) iterAsMapKey(mapper interface{}) mapIterator {
 		mapper:    r.ValueOf(mapper),
 	}
 }
+
+/************************************************ sequence stream exported ********************************************/
 
 // AsMapKey produce a MapEntryStream which using element in this object stream as map's key, and mapper(element)
 // as map's value from this ObjectStream
@@ -113,10 +129,15 @@ func (s *ObjectStream) Filter(filter interface{}) *ObjectStream {
 	if s.err != nil {
 		return s
 	}
-	// TODO do type check
+	fv := r.ValueOf(filter)
+	oType := s.outType()
+	if !isFilterOf(fv, s.outType()) || fv.Type().In(0).Kind() != oType.Kind() {
+		s.err = fmt.Errorf("filter type error, which is: %T", filter)
+		return s
+	}
 	s.resolveChain = append(s.resolveChain, &filterFun{
-		f:           r.ValueOf(filter),
-		contentType: s.outType(),
+		f:           fv,
+		contentType: oType,
 	})
 	return s
 }
@@ -125,11 +146,17 @@ func (s *ObjectStream) Map(mapper interface{}) *ObjectStream {
 	if s.err != nil {
 		return s
 	}
-	// TODO do type check
+	mv := r.ValueOf(mapper)
+	inType := s.outType()
+	if !isMapperOf(mv, inType.Kind()) {
+		s.err = fmt.Errorf("mapper type error, which is: %T", mapper)
+		return s
+	}
+	outType := r.TypeOf(mapper).Out(0)
 	s.resolveChain = append(s.resolveChain, &mapperFun{
-		f:       r.ValueOf(mapper),
-		inType:  s.outType(),
-		outType: r.TypeOf(mapper).Out(0),
+		f:       mv,
+		inType:  inType,
+		outType: outType,
 	})
 	return s
 }
@@ -143,13 +170,23 @@ func (s *ObjectStream) Collect() (interface{}, error) {
 	return s.collect(resValue).interfaceOrErr()
 }
 
-func (s *ObjectStream) CollectAt(u interface{}) error {
+func (s *ObjectStream) CollectAt(at interface{}) error {
 	if s.err != nil {
 		return s.err
 	}
-	// TODO do type check
-	slice := r.ValueOf(u).Elem()
-	return s.collect(slice).writeBack()
+	value := r.ValueOf(at)
+	if !isPointer(value) {
+		return fmt.Errorf("parameter of CollectAt should be pointer, but is: %T", at)
+	}
+	target := value.Elem()
+	if !isSlice(target) {
+		return fmt.Errorf("parameter of CollectAt should be pointer of slice, but is: %s", target.Kind().String())
+	}
+	elemType := target.Type().Elem()
+	if elemType.Kind() != s.outType().Kind() {
+		return fmt.Errorf("stream's element out type is: %s, while target elemet type is: %s", s.outType().String(), elemType.String())
+	}
+	return s.collect(target).writeBack()
 }
 
 // #no-type-check; #no-error-check
@@ -209,24 +246,7 @@ type MapEntryStream struct {
 	inKeyType         r.Type
 	inValueType       r.Type
 	iter              mapIterator
-	entryResolveChain []*entryResolver
-}
-
-type entryResolver struct {
-	fn           r.Value // func(entry)
-	outKeyType   r.Type
-	outValueType r.Type
-}
-
-func (er *entryResolver) invoke(e *entry) *entryResolveResult {
-	ok := er.fn.Call([]r.Value{e.k, e.v})[0].Bool()
-	if ok {
-		return &entryResolveResult{
-			ok:     true,
-			result: e,
-		}
-	}
-	return &entryResolveResult{ok: false}
+	entryResolveChain []entryResolver
 }
 
 func EntryStream(anyMap interface{}) *MapEntryStream {
@@ -242,35 +262,60 @@ func EntryStream(anyMap interface{}) *MapEntryStream {
 		inKeyType:         keyType,
 		inValueType:       valueType,
 		iter:              iter,
-		entryResolveChain: make([]*entryResolver, 0, 0),
+		entryResolveChain: make([]entryResolver, 0, 0),
 	}
 }
 
 func (ms *MapEntryStream) outKeyType() r.Type {
 	if len(ms.entryResolveChain) > 0 {
-		return ms.entryResolveChain[len(ms.entryResolveChain)-1].outKeyType
+		return ms.entryResolveChain[len(ms.entryResolveChain)-1].OutKeyType()
 	}
 	return ms.inKeyType
 }
 
 func (ms *MapEntryStream) outValueType() r.Type {
 	if len(ms.entryResolveChain) > 0 {
-		return ms.entryResolveChain[len(ms.entryResolveChain)-1].outValueType
+		return ms.entryResolveChain[len(ms.entryResolveChain)-1].OutValueType()
 	}
 	return ms.inValueType
 }
 
 /********************************************* entry stream exported **************************************************/
 
+type entryFilter struct {
+	fn           r.Value // func(entry)
+	outKeyType   r.Type
+	outValueType r.Type
+}
+
+func (er *entryFilter) Invoke(k, v r.Value) (r.Value, r.Value, bool) {
+	ok := er.fn.Call(p{k, v})[0].Bool()
+	return k, v, ok
+}
+
+func (er *entryFilter) OutKeyType() r.Type {
+	return er.outKeyType
+}
+
+func (er *entryFilter) OutValueType() r.Type {
+	return er.outValueType
+}
+
 func (ms *MapEntryStream) Filter(filter interface{}) *MapEntryStream {
 	if ms.err != nil {
 		return ms
 	}
-	// TODO do type check
-	ms.entryResolveChain = append(ms.entryResolveChain, &entryResolver{
-		fn:           r.ValueOf(filter),
-		outKeyType:   ms.outKeyType(),
-		outValueType: ms.outValueType(),
+	fv := r.ValueOf(filter)
+	keyType := ms.outKeyType()
+	valueType := ms.outValueType()
+	if !isEntryFilterOf(fv, keyType, valueType) {
+		ms.err = fmt.Errorf("filter type error: %T", filter)
+		return ms
+	}
+	ms.entryResolveChain = append(ms.entryResolveChain, &entryFilter{
+		fn:           fv,
+		outKeyType:   keyType,
+		outValueType: valueType,
 	})
 	return ms
 }
@@ -279,51 +324,45 @@ func (ms *MapEntryStream) Collect() (interface{}, error) {
 	if ms.err != nil {
 		return nil, ms.err
 	}
-	// TODO do type check
 	outKeyType := ms.outKeyType()
 	outValueType := ms.outValueType()
 	resMap := r.MakeMap(r.MapOf(outKeyType, outValueType))
-
 	return ms.collect(resMap).interfaceOrErr()
 }
 
-func (ms *MapEntryStream) CollectAt(uw interface{}) error {
-	targetMap := r.ValueOf(uw).Elem()
-	// TODO do type check
-	return ms.collect(targetMap).writeBack()
+func (ms *MapEntryStream) CollectAt(at interface{}) error {
+	if ms.err != nil {
+		return ms.err
+	}
+	pointer := r.ValueOf(at)
+	if !isPointer(pointer) {
+		return fmt.Errorf("parameter of CollectAt should be pointer, but is: %T", at)
+	}
+	value := pointer.Elem()
+	if !isMapOf(value, ms.outKeyType(), ms.outValueType()) {
+		return fmt.Errorf("parameter type error: %T", at)
+	}
+	return ms.collect(value).writeBack()
 }
 
 // #no-type-check; #no-error-check
 func (ms *MapEntryStream) collect(target r.Value) *collectResult {
 	for ms.iter.Next() {
 		valid := true
-		var entryValue = &entry{k: ms.iter.Key(), v: ms.iter.Value()}
+		k, v, ok := ms.iter.Key(), ms.iter.Value(), false
 		for _, fun := range ms.entryResolveChain {
-			result := fun.invoke(entryValue)
-			if result.ok {
-				entryValue = result.result
+			k, v, ok = fun.Invoke(k, v)
+			if ok {
 				continue
 			}
 			valid = false
 			break
 		}
 		if valid {
-			target.SetMapIndex(entryValue.k, entryValue.v)
+			target.SetMapIndex(k, v)
 		}
 	}
 	return &collectResult{origin: target, v: target, err: nil}
-}
-
-/********************************************* entry resolve result ***************************************************/
-
-type entryResolveResult struct {
-	result *entry
-	ok     bool
-}
-
-type entry struct {
-	k r.Value
-	v r.Value
 }
 
 /************************************************** stream common *****************************************************/

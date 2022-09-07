@@ -19,3 +19,12 @@ func TestIsSequence(t *testing.T) {
 		t.Errorf("nil interface{} should not be a sequence")
 	}
 }
+
+func TestIsFilter(t *testing.T) {
+	f := func(it int) bool {
+		return false
+	}
+	if !isFilterOf(r.ValueOf(f), r.TypeOf(0)) {
+		t.Errorf("f should be a filter")
+	}
+}

@@ -32,3 +32,9 @@ type resolver interface {
 	Invoke(v reflect.Value) (reflect.Value, bool)
 	OutType() reflect.Type
 }
+
+type entryResolver interface {
+	Invoke(k, v reflect.Value) (reflect.Value, reflect.Value, bool)
+	OutKeyType() reflect.Type
+	OutValueType() reflect.Type
+}
