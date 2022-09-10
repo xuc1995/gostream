@@ -14,7 +14,7 @@ At that time point, docs are rare, check *_test.go to figure out how to use it
 package main
 
 import (
-	"github/xuc1995/gostream"
+	"github.com/xuc1995/gostream"
 	"log"
 )
 

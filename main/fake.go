@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github/xuc1995/gostream"
+	"github.com/xuc1995/gostream"
 	"log"
 )
 
