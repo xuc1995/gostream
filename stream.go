@@ -6,9 +6,7 @@ import (
 	r "reflect"
 )
 
-var errParameterNotASequence = errors.New("parameter is not a sequence")
-
-var errParameterTypeNil = errors.New("parameter itemType is nil")
+var errNilParameter = errors.New("nil parameter is ill illegal")
 
 /************************************************* sequence stream ****************************************************/
 
@@ -19,6 +17,11 @@ type ObjectStream struct {
 	err          error
 }
 
+// S is short for SliceStream
+func S(sequence interface{}) *ObjectStream {
+	return SliceStream(sequence)
+}
+
 func SliceStream(sequence interface{}) *ObjectStream {
 	iter, err := iter(sequence)
 	if err != nil {
@@ -26,7 +29,7 @@ func SliceStream(sequence interface{}) *ObjectStream {
 	}
 	value := r.ValueOf(sequence)
 	if !isSequence(value) {
-		return &ObjectStream{err: errParameterNotASequence}
+		return &ObjectStream{err: fmt.Errorf("parameter is not sequence but: %T", sequence)}
 	}
 	typ := r.TypeOf(sequence)
 	return &ObjectStream{iter: iter, inType: typ.Elem()}
@@ -38,7 +41,7 @@ func SliceStream(sequence interface{}) *ObjectStream {
 // or it would cause runtime panic
 func Stream(iterator Iterator, itemType interface{}) *ObjectStream {
 	if !r.ValueOf(itemType).IsValid() {
-		return &ObjectStream{err: errParameterTypeNil}
+		return &ObjectStream{err: errNilParameter}
 	}
 	return &ObjectStream{iter: iterAdaptor{iterator}, inType: r.TypeOf(itemType)}
 }
@@ -268,6 +271,11 @@ type MapEntryStream struct {
 	inValueType       r.Type
 	iter              mapIterator
 	entryResolveChain []entryResolver
+}
+
+// ES is short for EntryStream
+func ES(anyMap interface{}) *MapEntryStream {
+	return EntryStream(anyMap)
 }
 
 func EntryStream(anyMap interface{}) *MapEntryStream {
